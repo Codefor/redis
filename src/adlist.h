@@ -82,6 +82,7 @@ void listReleaseIterator(listIter *iter);
 list *listDup(list *orig);
 listNode *listSearchKey(list *list, void *key);
 listNode *listIndex(list *list, long index);
+listNode *listGetRandomNode(list *list);
 void listRewind(list *list, listIter *li);
 void listRewindTail(list *list, listIter *li);
 void listRotate(list *list);

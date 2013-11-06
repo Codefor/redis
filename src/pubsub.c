@@ -47,6 +47,21 @@ int listMatchPubsubPattern(void *a, void *b) {
            (equalStringObjects(pa->pattern,pb->pattern));
 }
 
+void freePubsubMsg(void *m) {
+    pubsubMsg *msg = m;
+
+    decrRefCount(msg->channel);
+    decrRefCount(msg->message);
+    zfree(m);
+}
+
+int listMatchPubsubMsg(void *a, void *b) {
+    pubsubMsg *ma = a, *mb = b;
+
+    return (equalStringObjects(ma->channel,mb->channel)) && 
+           (equalStringObjects(ma->message,mb->message));
+}
+
 /* Subscribe a client to a channel. Returns 1 if the operation succeeded, or
  * 0 if the client was already subscribed to that channel. */
 int pubsubSubscribeChannel(redisClient *c, robj *channel) {
@@ -73,7 +88,25 @@ int pubsubSubscribeChannel(redisClient *c, robj *channel) {
     addReply(c,shared.mbulkhdr[3]);
     addReply(c,shared.subscribebulk);
     addReplyBulk(c,channel);
+    //return the total count of THIS client's pubsub_channels and pubsub_patterns
     addReplyLongLong(c,dictSize(c->pubsub_channels)+listLength(c->pubsub_patterns));
+
+    //check the unreceived cached data
+    listNode *ln;
+    listIter li;
+    listRewind(server.pubsub_msg_saved,&li);
+    while ((ln = listNext(&li)) != NULL) {
+        pubsubMsg *m = ln->value;
+	if(equalStringObjects(channel,m->channel)){
+	    addReply(c,shared.mbulkhdr[3]);
+	    addReply(c,shared.messagebulk);
+	    addReplyBulk(c,channel);
+	    addReplyBulk(c,m->message);
+
+	    listDelNode(server.pubsub_msg_saved,ln);
+	}
+    }
+
     return retval;
 }
 
@@ -216,7 +249,7 @@ int pubsubUnsubscribeAllPatterns(redisClient *c, int notify) {
 }
 
 /* Publish a message */
-int pubsubPublishMessage(robj *channel, robj *message) {
+int pubsubPublishMessage(robj *channel, robj *message,int broadcast) {
     int receivers = 0;
     struct dictEntry *de;
     listNode *ln;
@@ -230,16 +263,31 @@ int pubsubPublishMessage(robj *channel, robj *message) {
         listIter li;
 
         listRewind(list,&li);
-        while ((ln = listNext(&li)) != NULL) {
-            redisClient *c = ln->value;
+	if(broadcast){
+	    while ((ln = listNext(&li)) != NULL) {
+		redisClient *c = ln->value;
 
-            addReply(c,shared.mbulkhdr[3]);
-            addReply(c,shared.messagebulk);
-            addReplyBulk(c,channel);
-            addReplyBulk(c,message);
-            receivers++;
-        }
+		addReply(c,shared.mbulkhdr[3]);
+		addReply(c,shared.messagebulk);
+		addReplyBulk(c,channel);
+		addReplyBulk(c,message);
+		receivers++;
+	    }
+	}else{
+	    /* random select a client subscribed and send */
+	    ln = listGetRandomNode(list);
+	    redisClient *c = ln->value;
+
+	    addReply(c,shared.mbulkhdr[3]);
+	    addReply(c,shared.messagebulk);
+	    addReplyBulk(c,channel);
+	    addReplyBulk(c,message);
+	    receivers++;
+
+	    return receivers;
+	}
     }
+
     /* Send to clients listening to matching channels */
     if (listLength(server.pubsub_patterns)) {
         listRewind(server.pubsub_patterns,&li);
@@ -257,11 +305,46 @@ int pubsubPublishMessage(robj *channel, robj *message) {
                 addReplyBulk(pat->client,channel);
                 addReplyBulk(pat->client,message);
                 receivers++;
+
+		//if group message,we terminal the loop
+		if(broadcast == REDIS_PUBSUB_GROUP){
+		    break;
+		}
             }
         }
         decrRefCount(channel);
     }
+
+    /* if there's no receiver,we store the message */
+    if(receivers == 0){
+	pubsubSavePublishMessage(channel,message,broadcast);
+    }
     return receivers;
+}
+
+/* Save an unreceived message */
+
+int pubsubSavePublishMessage(robj *channel, robj *message,int broadcast) {
+    pubsubMsg *msg;
+
+    incrRefCount(channel);
+    msg = zmalloc(sizeof(*msg));
+    msg->channel= getDecodedObject(channel);
+    msg->message= getDecodedObject(message);
+    msg->broadcast = broadcast;
+
+    listAddNodeTail(server.pubsub_msg_saved,msg);
+
+    /**
+    listNode *ln;
+    listIter li;
+    listRewind(server.pubsub_msg_saved,&li);
+    while ((ln = listNext(&li)) != NULL) {
+        pubsubMsg *m = ln->value;
+	printf("%s\t%s\t%d\n",(char*)m->channel->ptr,(char*)m->message->ptr,m->broadcast);
+    }*/
+
+    return REDIS_OK;
 }
 
 /*-----------------------------------------------------------------------------
@@ -305,6 +388,12 @@ void punsubscribeCommand(redisClient *c) {
 }
 
 void publishCommand(redisClient *c) {
-    int receivers = pubsubPublishMessage(c->argv[1],c->argv[2]);
+    int receivers = pubsubPublishMessage(c->argv[1],c->argv[2],REDIS_PUBSUB_BROADCAST);
     addReplyLongLong(c,receivers);
 }
+
+void gpublishCommand(redisClient *c) {
+    int receivers = pubsubPublishMessage(c->argv[1],c->argv[2],REDIS_PUBSUB_GROUP);
+    addReplyLongLong(c,receivers);
+}
+

@@ -126,6 +126,11 @@
 #define REDIS_CMD_STALE 1024                /* "t" flag */
 #define REDIS_CMD_SKIP_MONITOR 2048         /* "M" flag */
 
+/** PUBSUB */
+
+#define REDIS_PUBSUB_GROUP 0
+#define REDIS_PUBSUB_BROADCAST 1
+
 /* Object types */
 #define REDIS_STRING 0
 #define REDIS_LIST 1
@@ -661,6 +666,7 @@ struct redisServer {
     /* Pubsub */
     dict *pubsub_channels;  /* Map channels to list of subscribed clients */
     list *pubsub_patterns;  /* A list of pubsub_patterns */
+    list *pubsub_msg_saved;  /* A list of pubsub_msg saved*/
     /* Scripting */
     lua_State *lua; /* The Lua interpreter. We use just one for all clients */
     redisClient *lua_client;   /* The "fake client" to query Redis from Lua */
@@ -687,6 +693,12 @@ typedef struct pubsubPattern {
     redisClient *client;
     robj *pattern;
 } pubsubPattern;
+
+typedef struct pubsubMsg {
+    robj *channel;
+    robj *message;
+    int broadcast;
+} pubsubMsg;
 
 typedef void redisCommandProc(redisClient *c);
 typedef int *redisGetKeysProc(struct redisCommand *cmd, robj **argv, int argc, int *numkeys, int flags);
@@ -1014,7 +1026,10 @@ int pubsubUnsubscribeAllChannels(redisClient *c, int notify);
 int pubsubUnsubscribeAllPatterns(redisClient *c, int notify);
 void freePubsubPattern(void *p);
 int listMatchPubsubPattern(void *a, void *b);
-int pubsubPublishMessage(robj *channel, robj *message);
+void freePubsubMsg(void *m);
+int listMatchPubsubMsg(void *a, void *b);
+int pubsubPublishMessage(robj *channel, robj *message, int broadcast);
+int pubsubSavePublishMessage(robj *channel, robj *message, int broadcast);
 
 /* Configuration */
 void loadServerConfig(char *filename, char *options);
@@ -1188,6 +1203,7 @@ void unsubscribeCommand(redisClient *c);
 void psubscribeCommand(redisClient *c);
 void punsubscribeCommand(redisClient *c);
 void publishCommand(redisClient *c);
+void gpublishCommand(redisClient *c);
 void watchCommand(redisClient *c);
 void unwatchCommand(redisClient *c);
 void restoreCommand(redisClient *c);

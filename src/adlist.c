@@ -29,6 +29,8 @@
  */
 
 
+#include "fmacros.h"
+
 #include <stdlib.h>
 #include "adlist.h"
 #include "zmalloc.h"
@@ -322,6 +324,24 @@ listNode *listIndex(list *list, long index) {
         while(index-- && n) n = n->next;
     }
     return n;
+}
+
+listNode *listGetRandomNode(list *list){
+    unsigned long len;
+    unsigned int index;
+
+    len = listLength(list);
+    if (len <= 0) return NULL;
+
+    listNode *ln = NULL;
+    listIter li;
+
+    listRewind(list,&li);
+
+    index = random() % len;
+    while((ln = listNext(&li)) != NULL && index -- ){
+    }
+    return ln;
 }
 
 /* Rotate the list removing the tail node and inserting it to the head. */

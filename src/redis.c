@@ -237,6 +237,7 @@ struct redisCommand redisCommandTable[] = {
     {"psubscribe",psubscribeCommand,-2,"rpslt",0,NULL,0,0,0,0,0},
     {"punsubscribe",punsubscribeCommand,-1,"rpslt",0,NULL,0,0,0,0,0},
     {"publish",publishCommand,3,"pfltr",0,NULL,0,0,0,0,0},
+    {"gpublish",gpublishCommand,3,"pfltr",0,NULL,0,0,0,0,0},
     {"watch",watchCommand,-2,"rs",0,noPreloadGetKeys,1,-1,1,0,0},
     {"unwatch",unwatchCommand,1,"rs",0,NULL,0,0,0,0,0},
     {"restore",restoreCommand,4,"awm",0,NULL,1,1,1,0,0},
@@ -1451,8 +1452,12 @@ void initServer() {
     }
     server.pubsub_channels = dictCreate(&keylistDictType,NULL);
     server.pubsub_patterns = listCreate();
+    server.pubsub_msg_saved = listCreate();
     listSetFreeMethod(server.pubsub_patterns,freePubsubPattern);
     listSetMatchMethod(server.pubsub_patterns,listMatchPubsubPattern);
+    listSetFreeMethod(server.pubsub_patterns,freePubsubMsg);
+    listSetMatchMethod(server.pubsub_patterns,listMatchPubsubMsg);
+
     server.cronloops = 0;
     server.rdb_child_pid = -1;
     server.aof_child_pid = -1;
