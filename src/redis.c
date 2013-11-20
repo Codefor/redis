@@ -934,6 +934,30 @@ void databasesCron(void) {
     }
 }
 
+
+void pubsubCron(void) {
+    /* Make sure to process at least REDIS_PUBSUB_CRON_BATCH_SIZE(1024) message per call.
+     * And it will not block the server for to long.
+     * Since this function is called server.hz times per second we are sure that
+     * in the worst case we process 10240 in 1 second.
+     * */
+
+    listNode *ln;
+    listIter li;
+    listRewind(server.pubsub_msg_saved,&li);
+    int counter = 0;
+    while ((ln = listNext(&li)) != NULL) {
+        pubsubMsg *m = ln->value;
+
+	if( pubsubPublishMessage(m->channel,m->message,m->type) > 0){
+	    listDelNode(server.pubsub_msg_saved,ln);
+	}
+
+	counter  ++;
+	if ( counter >= REDIS_PUBSUB_CRON_BATCH_SIZE ) break;
+    }
+}
+
 /* This is our timer interrupt, called server.hz times per second.
  * Here is where we do a number of things that need to be done asynchronously.
  * For instance:
@@ -1029,6 +1053,9 @@ int serverCron(struct aeEventLoop *eventLoop, long long id, void *clientData) {
 
     /* Handle background operations on Redis databases. */
     databasesCron();
+
+    /* we need to dispatch the cached messages to clients if any. */
+    pubsubCron();
 
     /* Start a scheduled AOF rewrite if this was requested by the user while
      * a BGSAVE was in progress. */

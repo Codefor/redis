@@ -128,8 +128,9 @@
 
 /** PUBSUB */
 
-#define REDIS_PUBSUB_GROUP 0
-#define REDIS_PUBSUB_BROADCAST 1
+#define REDIS_PUBSUB_MSG_TYPE_GROUP 0
+#define REDIS_PUBSUB_MSG_TYPE_BROADCAST 1
+#define REDIS_PUBSUB_CRON_BATCH_SIZE 1024
 
 /* Object types */
 #define REDIS_STRING 0
@@ -697,7 +698,7 @@ typedef struct pubsubPattern {
 typedef struct pubsubMsg {
     robj *channel;
     robj *message;
-    int broadcast;
+    int type;
 } pubsubMsg;
 
 typedef void redisCommandProc(redisClient *c);
@@ -1028,8 +1029,9 @@ void freePubsubPattern(void *p);
 int listMatchPubsubPattern(void *a, void *b);
 void freePubsubMsg(void *m);
 int listMatchPubsubMsg(void *a, void *b);
-int pubsubPublishMessage(robj *channel, robj *message, int broadcast);
-int pubsubSavePublishMessage(robj *channel, robj *message, int broadcast);
+int pubsubPublishMessageSafe(robj *channel, robj *message, int type);
+int pubsubPublishMessage(robj *channel, robj *message, int type);
+int pubsubSavePublishMessage(robj *channel, robj *message, int type);
 
 /* Configuration */
 void loadServerConfig(char *filename, char *options);
