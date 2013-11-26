@@ -936,26 +936,51 @@ void databasesCron(void) {
 
 
 void pubsubCron(void) {
-    /* Make sure to process at least REDIS_PUBSUB_CRON_BATCH_SIZE(1024) message per call.
-     * And it will not block the server for to long.
+    /* Make sure to process more or less REDIS_PUBSUB_CRON_BATCH_SIZE(1024) message per call.
+     * And it will not block the server for too long.
+     * For every available channel,we will publish at least 1 message.
+     *
      * Since this function is called server.hz times per second we are sure that
      * in the worst case we process 10240 in 1 second.
      * */
 
-    listNode *ln;
-    listIter li;
-    listRewind(server.pubsub_msg_saved,&li);
-    int counter = 0;
-    while ((ln = listNext(&li)) != NULL) {
-        pubsubMsg *m = ln->value;
+    int all_channels = dictSize(server.pubsub_msg_saved);
+    if(all_channels <= 0) return;
 
-	if( pubsubPublishMessage(m->channel,m->message,m->type) > 0){
-	    listDelNode(server.pubsub_msg_saved,ln);
+    dictIterator *di = dictGetSafeIterator(server.pubsub_msg_saved);
+    if(!di) return;
+
+    dictEntry *de;
+
+    int avai_channels = all_channels;
+    /* iter all the channels saved in server.pubsub_msg_saved */
+    while((de = dictNext(di)) != NULL) {
+	robj *channel = dictGetKey(de);
+
+	if(dictFind(server.pubsub_channels,channel)){
+	    //there do exist clients that subscribe this channel
+	    list *list = dictGetVal(de);
+	    listNode *ln;
+	    listIter li;
+	    listRewind(list,&li);
+
+	    int counter = 0;
+	    while ((ln = listNext(&li)) != NULL) {
+		pubsubMsg *m = ln->value;
+
+		if(pubsubPublishMessage(m->channel,m->message,m->type) > 0){
+		    listDelNode(list,ln);
+		}
+
+		counter  ++;
+		if (counter >= (REDIS_PUBSUB_CRON_BATCH_SIZE / avai_channels)) break;
+	    }
+	}else{
+	    if(avai_channels > 1) avai_channels --;
 	}
-
-	counter  ++;
-	if ( counter >= REDIS_PUBSUB_CRON_BATCH_SIZE ) break;
     }
+
+    dictReleaseIterator(di);
 }
 
 /* This is our timer interrupt, called server.hz times per second.
@@ -1479,7 +1504,7 @@ void initServer() {
     }
     server.pubsub_channels = dictCreate(&keylistDictType,NULL);
     server.pubsub_patterns = listCreate();
-    server.pubsub_msg_saved = listCreate();
+    server.pubsub_msg_saved = dictCreate(&keylistDictType,NULL);
     listSetFreeMethod(server.pubsub_patterns,freePubsubPattern);
     listSetMatchMethod(server.pubsub_patterns,listMatchPubsubPattern);
     listSetFreeMethod(server.pubsub_patterns,freePubsubMsg);
@@ -1753,9 +1778,9 @@ void call(redisClient *c, int flags) {
  * processCommand() execute the command or prepare the
  * server for a bulk read from the client.
  *
- * If 1 is returned the client is still alive and valid and
+ * If REDIS_OK is returned the client is still alive and valid and
  * other operations can be performed by the caller. Otherwise
- * if 0 is returned the client was destroyed (i.e. after QUIT). */
+ * if REDIS_ERR is returned the client was destroyed (i.e. after QUIT). */
 int processCommand(redisClient *c) {
     /* The QUIT command is handled separately. Normal command procs will
      * go through checking for replication and QUIT will cause trouble

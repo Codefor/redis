@@ -667,7 +667,7 @@ struct redisServer {
     /* Pubsub */
     dict *pubsub_channels;  /* Map channels to list of subscribed clients */
     list *pubsub_patterns;  /* A list of pubsub_patterns */
-    list *pubsub_msg_saved;  /* A list of pubsub_msg saved*/
+    dict *pubsub_msg_saved;  /* A dict of pubsub_msg saved that has channels as keys*/
     /* Scripting */
     lua_State *lua; /* The Lua interpreter. We use just one for all clients */
     redisClient *lua_client;   /* The "fake client" to query Redis from Lua */

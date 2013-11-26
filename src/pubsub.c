@@ -328,8 +328,20 @@ int pubsubSavePublishMessage(robj *channel, robj *message,int type) {
     msg->message= getDecodedObject(message);
     msg->type = type;
 
-    listAddNodeTail(server.pubsub_msg_saved,msg);
+    struct dictEntry *de;
+    list *msgs = NULL;
 
+    de = dictFind(server.pubsub_msg_saved,channel);
+    if (de == NULL) {
+	msgs = listCreate();
+	dictAdd(server.pubsub_msg_saved,channel,msgs);
+	incrRefCount(channel);
+    } else {
+	msgs = dictGetVal(de);
+    }
+    listAddNodeTail(msgs,msg);
+
+    server.dirty++;
     return REDIS_OK;
 }
 

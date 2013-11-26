@@ -857,16 +857,14 @@ int rewriteAppendOnlyFile(char *filename) {
     rioInitWithFile(&aof,fp);
     if (server.aof_rewrite_incremental_fsync)
         rioSetAutoSync(&aof,REDIS_AOF_AUTOSYNC_BYTES);
+
+    char selectcmd[] = "*2\r\n$6\r\nSELECT\r\n";
     for (j = 0; j < server.dbnum; j++) {
-        char selectcmd[] = "*2\r\n$6\r\nSELECT\r\n";
         redisDb *db = server.db+j;
         dict *d = db->dict;
         if (dictSize(d) == 0) continue;
         di = dictGetSafeIterator(d);
-        if (!di) {
-            fclose(fp);
-            return REDIS_ERR;
-        }
+        if (!di) goto werr;
 
         /* SELECT the new DB */
         if (rioWrite(&aof,selectcmd,sizeof(selectcmd)-1) == 0) goto werr;
@@ -914,6 +912,47 @@ int rewriteAppendOnlyFile(char *filename) {
                 if (rioWriteBulkLongLong(&aof,expiretime) == 0) goto werr;
             }
         }
+
+        dictReleaseIterator(di);
+    }
+
+    //rewrite pubsub message
+    if(dictSize(server.pubsub_msg_saved) > 0){
+	di = dictGetSafeIterator(server.pubsub_msg_saved);
+	if(!di) goto werr;
+
+        /* SELECT the new DB */
+        if (rioWrite(&aof,selectcmd,sizeof(selectcmd)-1) == 0) goto werr;
+        if (rioWriteBulkLongLong(&aof,0) == 0) goto werr;
+	/* 
+	 * examples:
+	 * publish:*3\r\n$7\r\npublish\r\n$1a\r\n$1\r\nb\r\n
+	 * gpublish:*3\r\n$8\r\ngpublish\r\n$1a\r\n$1\r\nb\r\n
+	 */
+        char publishcmd[]="*3\r\n$7\r\npublish\r\n";
+        char gpublishcmd[]="*3\r\n$8\r\ngpublish\r\n";
+
+	while((de = dictNext(di)) != NULL) {
+	    list *list = dictGetVal(de);
+	    listNode *ln;
+	    listIter li;
+	    listRewind(list,&li);
+
+	    while ((ln = listNext(&li)) != NULL) {
+		pubsubMsg *m = ln->value;
+		switch(m->type){
+		    case REDIS_PUBSUB_MSG_TYPE_BROADCAST:
+			if (rioWrite(&aof,publishcmd,sizeof(publishcmd)-1) == 0) goto werr;
+			break;
+		    case REDIS_PUBSUB_MSG_TYPE_GROUP:
+			if (rioWrite(&aof,gpublishcmd,sizeof(gpublishcmd)-1) == 0) goto werr;
+			break;
+		}
+
+                if (rioWriteBulkObject(&aof,m->channel) == 0) goto werr;
+                if (rioWriteBulkObject(&aof,m->message) == 0) goto werr;
+	    }
+	}
         dictReleaseIterator(di);
     }
 
