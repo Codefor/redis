@@ -1099,6 +1099,27 @@ void getClientsMaxBuffers(unsigned long *longest_output_list,
     *biggest_input_buffer = bib;
 }
 
+/* Turn a Redis client channel info into an sds string representing its state. */
+sds getClientChannelInfoString(redisClient *client) {
+    char ip[32];
+    int port = 0; /* initialized to zero for the unix socket case. */
+
+    if (!(client->flags & REDIS_UNIX_SOCKET))
+        anetPeerToString(client->fd,ip,&port);
+
+    return sdscatprintf(sdsempty(),
+        "addr=%s:%d fd=%d name=%s age=%ld idle=%ld db=%d subscribe_channel_num=%d cmd=%s",
+        (client->flags & REDIS_UNIX_SOCKET) ? server.unixsocket : ip,
+        port,
+        client->fd,
+        client->name ? (char*)client->name->ptr : "",
+        (long)(server.unixtime - client->ctime),
+        (long)(server.unixtime - client->lastinteraction),
+        client->db->id,
+        (int) dictSize(client->pubsub_channels),
+        client->lastcmd ? client->lastcmd->name : "NULL");
+}
+
 /* Turn a Redis client into an sds string representing its state. */
 sds getClientInfoString(redisClient *client) {
     char ip[32], flags[16], events[3], *p;
@@ -1131,7 +1152,7 @@ sds getClientInfoString(redisClient *client) {
     if (emask & AE_WRITABLE) *p++ = 'w';
     *p = '\0';
     return sdscatprintf(sdsempty(),
-        "addr=%s:%d fd=%d name=%s age=%ld idle=%ld flags=%s db=%d sub=%d psub=%d multi=%d qbuf=%lu qbuf-free=%lu obl=%lu oll=%lu omem=%lu events=%s cmd=%s",
+        "addr=%s:%d fd=%d name=%s age=%ld idle=%ld flags=%s db=%d subscribe_channel_num=%d psubscribe_pattern_num=%d multi=%d qbuf=%lu qbuf-free=%lu obl=%lu oll=%lu omem=%lu events=%s cmd=%s\r\n",
         (client->flags & REDIS_UNIX_SOCKET) ? server.unixsocket : ip,
         port,
         client->fd,
@@ -1233,8 +1254,33 @@ void clientCommand(redisClient *c) {
             addReplyBulk(c,c->name);
         else
             addReply(c,shared.nullbulk);
+    } else if (!strcasecmp(c->argv[1]->ptr,"channel") && c->argc == 2) {
+        dictIterator *di = dictGetSafeIterator(server.pubsub_channels);
+        dictEntry *de;
+
+        addReplyMultiBulkLen(c, dictSize(server.pubsub_channels));
+        while((de = dictNext(di)) != NULL) {
+            robj *channel = dictGetKey(de);
+
+	        list *list = dictGetVal(de);
+
+            listRewind(list,&li);
+            while ((ln = listNext(&li)) != NULL) {
+                sds o = sdsempty();
+                o = sdscatlen(o, channel->ptr,sdslen(channel->ptr));
+                o = sdscat(o, ":");
+
+                client = listNodeValue(ln);
+                sds cs = getClientChannelInfoString(client);
+                o = sdscatlen(o, cs, sdslen(cs));
+                sdsfree(cs);
+
+                addReplyBulkCBuffer(c,o,sdslen(o));
+                sdsfree(o);
+            }
+        }
     } else {
-        addReplyError(c, "Syntax error, try CLIENT (LIST | KILL ip:port | GETNAME | SETNAME connection-name)");
+        addReplyError(c, "Syntax error, try CLIENT (LIST | KILL ip:port | GETNAME | SETNAME connection-name | CHANNEL)");
     }
 }
 

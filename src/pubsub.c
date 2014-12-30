@@ -237,8 +237,21 @@ int pubsubPublishMessageSafe(robj *channel, robj *message,int type) {
     int receivers = pubsubPublishMessage(channel,message,type);
 
     if(receivers == 0){
-	pubsubSavePublishMessage(channel,message,type);
+        pubsubSavePublishMessage(channel,message,type);
     }
+
+    /*
+    //You can use these following methods dump the robj info
+
+    char buf[64],buf2[64];
+    memcpy(buf, channel->ptr, sdslen(channel->ptr));
+    buf[sdslen(channel->ptr)] = '\0';
+
+    memcpy(buf2, message->ptr, sdslen(message->ptr));
+    buf2[sdslen(message->ptr)] = '\0';
+
+    fprintf(stderr, "pubsubPublishMessageSafe ==> channel:%s, message:%s, receivers:%d\n", buf, buf2, receivers);
+    */
     return receivers;
 }
 
@@ -257,33 +270,33 @@ int pubsubPublishMessage(robj *channel, robj *message,int type) {
         listIter li;
 
         listRewind(list,&li);
-	if(type == REDIS_PUBSUB_MSG_TYPE_BROADCAST){
-	    /* we send the message to every client */
-	    while ((ln = listNext(&li)) != NULL) {
-		redisClient *c = ln->value;
+        if(type == REDIS_PUBSUB_MSG_TYPE_BROADCAST){
+            /* we send the message to every client */
+            while ((ln = listNext(&li)) != NULL) {
+                redisClient *c = ln->value;
 
-		addReply(c,shared.mbulkhdr[3]);
-		addReply(c,shared.messagebulk);
-		addReplyBulk(c,channel);
-		addReplyBulk(c,message);
-		receivers++;
-	    }
-	}else if(type == REDIS_PUBSUB_MSG_TYPE_GROUP){
-	    /* for group message,we send to only one random client
-	     * and return directly.
-	     */
+                addReply(c,shared.mbulkhdr[3]);
+                addReply(c,shared.messagebulk);
+                addReplyBulk(c,channel);
+                addReplyBulk(c,message);
+                receivers++;
+            }
+        }else if(type == REDIS_PUBSUB_MSG_TYPE_GROUP){
+            /* for group message,we send to only one random client
+             * and return directly.
+             */
 
-	    ln = listGetRandomNode(list);
-	    redisClient *c = ln->value;
+            ln = listGetRandomNode(list);
+            redisClient *c = ln->value;
 
-	    addReply(c,shared.mbulkhdr[3]);
-	    addReply(c,shared.messagebulk);
-	    addReplyBulk(c,channel);
-	    addReplyBulk(c,message);
-	    receivers++;
+            addReply(c,shared.mbulkhdr[3]);
+            addReply(c,shared.messagebulk);
+            addReplyBulk(c,channel);
+            addReplyBulk(c,message);
+            receivers++;
 
-	    return receivers;
-	}
+            return receivers;
+        }
     }
 
     /* Send to clients listening to matching channels */
@@ -294,9 +307,9 @@ int pubsubPublishMessage(robj *channel, robj *message,int type) {
             pubsubPattern *pat = ln->value;
 
             if (stringmatchlen((char*)pat->pattern->ptr,
-                                sdslen(pat->pattern->ptr),
-                                (char*)channel->ptr,
-                                sdslen(channel->ptr),0)) {
+                        sdslen(pat->pattern->ptr),
+                        (char*)channel->ptr,
+                        sdslen(channel->ptr),0)) {
                 addReply(pat->client,shared.mbulkhdr[4]);
                 addReply(pat->client,shared.pmessagebulk);
                 addReplyBulk(pat->client,pat->pattern);
@@ -304,11 +317,11 @@ int pubsubPublishMessage(robj *channel, robj *message,int type) {
                 addReplyBulk(pat->client,message);
                 receivers++;
 
-		//if group message,we terminal the loop
-		//TODO this will always send to the first client!
-		if(type == REDIS_PUBSUB_MSG_TYPE_GROUP){
-		    break;
-		}
+                //if group message,we terminal the loop
+                //TODO this will always send to the first client!
+                if(type == REDIS_PUBSUB_MSG_TYPE_GROUP){
+                    break;
+                }
             }
         }
         decrRefCount(channel);
@@ -333,11 +346,11 @@ int pubsubSavePublishMessage(robj *channel, robj *message,int type) {
 
     de = dictFind(server.pubsub_msg_saved,channel);
     if (de == NULL) {
-	msgs = listCreate();
-	dictAdd(server.pubsub_msg_saved,channel,msgs);
-	incrRefCount(channel);
+        msgs = listCreate();
+        dictAdd(server.pubsub_msg_saved,channel,msgs);
+        incrRefCount(channel);
     } else {
-	msgs = dictGetVal(de);
+        msgs = dictGetVal(de);
     }
     listAddNodeTail(msgs,msg);
 
