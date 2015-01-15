@@ -1258,7 +1258,19 @@ void clientCommand(redisClient *c) {
         dictIterator *di = dictGetSafeIterator(server.pubsub_channels);
         dictEntry *de;
 
-        addReplyMultiBulkLen(c, dictSize(server.pubsub_channels));
+        int total_channel_clients = 0;
+        while((de = dictNext(di)) != NULL) {
+            list *list = dictGetVal(de);
+
+            listRewind(list,&li);
+            while ((ln = listNext(&li)) != NULL) {
+                total_channel_clients ++;
+            }
+        }
+
+        addReplyMultiBulkLen(c, total_channel_clients);
+
+        di = dictGetSafeIterator(server.pubsub_channels);
         while((de = dictNext(di)) != NULL) {
             robj *channel = dictGetKey(de);
 
